@@ -16,11 +16,14 @@ def get_args():
     parser.add_argument("--sentence", "-s", type=str, required=False, default="爱芯元智半导体股份有限公司，致力于打造世界领先的人工智能感知与边缘计算芯片。服务智慧城市、智能驾驶、机器人的海量普惠的应用")
     parser.add_argument("--wav", "-w", type=str, required=False, default="output.wav")
     parser.add_argument("--encoder", "-e", type=str, required=False, default="../models/encoder.onnx")
+    parser.add_argument("--flow", "-f", type=str, required=False, default="../models/flow.axmodel")
     parser.add_argument("--decoder", "-d", type=str, required=False, default="../models/decoder.axmodel")
     parser.add_argument("--sample_rate", "-sr", type=int, required=False, default=44100)
     parser.add_argument("--speed", type=float, required=False, default=0.8)
     parser.add_argument("--lexicon", type=str, required=False, default="../models/lexicon.txt")
     parser.add_argument("--token", type=str, required=False, default="../models/tokens.txt")
+    parser.add_argument("--g_src", type=str, required=False, default="../models/g_src.bin")
+    parser.add_argument("--g_dst", type=str, required=False, default="../models/g_dst.bin")
     return parser.parse_args()
 
 
@@ -66,7 +69,7 @@ def generate_word_pron_num(pron_lens, pron_slices):
     return pron_num
 
 
-def decode_long_word(sess_dec, z_p, g, dec_len):
+def decode_long_word(sess_flow, sess_dec, z_p, g_src, g_dst, dec_len):
     z_p_len = z_p.shape[-1]
     slice_num = int(np.ceil(z_p_len / dec_len))
     sub_audio_list = []
@@ -80,8 +83,14 @@ def decode_long_word(sess_dec, z_p, g, dec_len):
             z_p_slice = np.concatenate((z_p_slice, np.zeros((*z_p_slice.shape[:-1], dec_len - z_p_slice.shape[-1]), dtype=np.float32)), axis=-1)
 
         start = time.time()
-        audio = sess_dec.run(input_feed={"z_p": z_p_slice,
-                            "g": g
+        z = sess_flow.run(input_feed={"z_p": z_p_slice,
+                            "g": g_src
+                            })["z"].flatten()
+        print(f"Long word slice[{i}]: flow run take {1000 * (time.time() - start):.2f}ms")
+
+        start = time.time()
+        audio = sess_dec.run(input_feed={"z_p": z,
+                            "g": g_dst
                             })["audio"].flatten()
         audio = audio[:sub_audio_len]
         print(f"Long word slice[{i}]: decoder run take {1000 * (time.time() - start):.2f}ms")
@@ -150,14 +159,20 @@ def main():
     lexicon_filename = args.lexicon
     token_filename = args.token
     enc_model = args.encoder # default="../models/encoder.onnx"
+    flow_model = args.flow   # default="../models/flow.axmodel"
     dec_model = args.decoder # default="../models/decoder.axmodel"
+    g_src_filename = args.g_src
+    g_dst_filename = args.g_dst
 
     print(f"sentence: {sentence}")
     print(f"sample_rate: {sample_rate}")
     print(f"lexicon: {lexicon_filename}")
     print(f"token: {token_filename}")
     print(f"encoder: {enc_model}")
+    print(f"flow: {flow_model}")
     print(f"decoder: {dec_model}")
+    print(f"g_src: {g_src_filename}")
+    print(f"g_dst: {g_dst_filename}")
 
     # Split sentence
     sens = split_sentences_zh(sentence)
@@ -168,12 +183,14 @@ def main():
     # Load models
     start = time.time()
     sess_enc = ort.InferenceSession(enc_model, providers=["CPUExecutionProvider"], sess_options=ort.SessionOptions())
+    sess_flow = InferenceSession.load_from_model(flow_model)
     sess_dec = InferenceSession.load_from_model(dec_model)
     dec_len = sess_dec.get_output_shapes()[0][-1] // 512
     print(f"load models take {1000 * (time.time() - start)}ms")
 
     # Load static input
-    g = np.fromfile("../models/g.bin", dtype=np.float32).reshape(1, 256, 1)
+    g_src = np.fromfile(g_src_filename, dtype=np.float32).reshape(1, 256, 1)
+    g_dst = np.fromfile(g_dst_filename, dtype=np.float32).reshape(1, 256, 1)
 
     # Final wav
     audio_list = []
@@ -202,7 +219,7 @@ def main():
 
         start = time.time()
         z_p, pronoun_lens, audio_len = sess_enc.run(None, input_feed={
-                                    'phone': phones, 'g': g,
+                                    'phone': phones, 'g': g_src,
                                     'tone': tones, 'language': language, 
                                     'noise_scale': np.array([0], dtype=np.float32),
                                     'length_scale': np.array([1.0 / args.speed], dtype=np.float32),
@@ -238,22 +255,36 @@ def main():
                 phone_strs.extend(phone_str[pron_slices[n]])
             # print(f"phone str: {phone_strs}")
 
-            if is_long[i]:
-                sub_audio_list.extend(decode_long_word(sess_dec, z_p[..., zp_start : zp_end], g, dec_len))
-            else:
-                sub_dec_len = zp_end - zp_start
-                sub_audio_len = 512 * sub_dec_len
+            sub_dec_len = zp_end - zp_start
+            sub_audio_len = 512 * sub_dec_len
 
-                zp_slice = z_p[..., zp_start : zp_end]
+            zp_slice = z_p[..., zp_start : zp_end]
+            
+            if is_long[i]:
+                sub_audio_list.extend(decode_long_word(sess_flow, sess_dec, zp_slice, g_src, g_dst, dec_len))
+            else:
                 if zp_slice.shape[-1] < dec_len:
                     zp_slice = np.concatenate((zp_slice, np.zeros((*zp_slice.shape[:-1], dec_len - zp_slice.shape[-1]), dtype=np.float32)), axis=-1)
 
                 start = time.time()
-                audio = sess_dec.run(input_feed={"z_p": zp_slice,
-                                    "g": g
+                z = sess_flow.run(input_feed={"z_p": zp_slice,
+                                    "g": g_src
+                                    })["z"].flatten()
+                print(f"Sentence[{n}] Slice[{i}]: flow run take {1000 * (time.time() - start):.2f}ms")
+
+                start = time.time()
+                audio = sess_dec.run(input_feed={"z_p": z,
+                                    "g": g_dst
                                     })["audio"].flatten()
                 audio = audio[:sub_audio_len]
                 print(f"Sentence[{n}] Slice[{i}]: decoder run take {1000 * (time.time() - start):.2f}ms")
+
+                # start = time.time()
+                # audio = sess_dec.run(input_feed={"z_p": zp_slice,
+                #                     "g": g_src
+                #                     })["audio"].flatten()
+                # audio = audio[:sub_audio_len]
+                # print(f"Sentence[{n}] Slice[{i}]: decoder run take {1000 * (time.time() - start):.2f}ms")
 
                 if strip_flags[i][0]:
                     # strip head

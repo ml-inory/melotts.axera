@@ -140,7 +140,7 @@ class TTS(nn.Module):
             else:
                 tx = tqdm(texts)
 
-        input_names = ['z_p', 'g']
+        input_names = ['z_p', 'g', 'z']
         calib_dataset_root = "calibration_dataset"
         tar_files = {}
         tar_filenames = {}
@@ -156,14 +156,15 @@ class TTS(nn.Module):
             bert, ja_bert, phones, tones, lang_ids = get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id)
             
             with torch.no_grad():
-                g = self.model.emb_g(torch.IntTensor([speaker_id])).unsqueeze(-1)
-                g.numpy().astype(np.float32).tofile("../models/g.bin")
+                g_src = self.model.emb_g(torch.IntTensor([speaker_id])).unsqueeze(-1)
+                g_src.numpy().astype(np.float32).tofile("../models/g_src.bin")
+                g_dst = torch.from_numpy(np.fromfile("../models/g_dst.bin", dtype=np.float32).reshape((1, 256, 1)))
 
                 z_p, pronoun_lens, audio_len = self.model.enc_forward(
                     phones,
                     tones,
                     lang_ids,
-                    g
+                    g_src
                 )
                 audio_len = audio_len.item()
 
@@ -176,7 +177,9 @@ class TTS(nn.Module):
                     if z_p_slice.size(-1) < dec_len:
                         z_p_slice = F.pad(z_p_slice, (0, dec_len - z_p_slice.size(-1)), mode="constant", value=0)
 
-                    audio = self.model.flow_dec_forward(z_p_slice, g)
+                    z = self.model.flow_forward(z_p_slice, g_src)
+
+                    audio = self.model.flow_dec_forward(z, g_dst)
                     audio = audio[0, 0].data.cpu().float().numpy()
                     sub_audio_len += audio.shape[-1]
 
@@ -187,9 +190,11 @@ class TTS(nn.Module):
                     
                     np.save(f"{calib_dataset_root}/z_p/{n}.npy", z_p_slice.numpy().astype(np.float32))
                     np.save(f"{calib_dataset_root}/g/{n}.npy", g.numpy().astype(np.float32))
+                    np.save(f"{calib_dataset_root}/z/{n}.npy", z.numpy().astype(np.float32))
 
                     tar_files["z_p"].add(f"{calib_dataset_root}/z_p/{n}.npy")
                     tar_files["g"].add(f"{calib_dataset_root}/g/{n}.npy")
+                    tar_files["z"].add(f"{calib_dataset_root}/z/{n}.npy")
                     
         for name in input_names:
             print(f"Save {tar_filenames[name]}")
@@ -229,14 +234,15 @@ class TTS(nn.Module):
             bert, ja_bert, phones, tones, lang_ids = get_text_for_tts_infer(t, language, self.hps, device, self.symbol_to_id)
             
             with torch.no_grad():
-                g = self.model.emb_g(torch.IntTensor([speaker_id])).unsqueeze(-1)
-                g.numpy().astype(np.float32).tofile("../models/g.bin")
+                g_src = self.model.emb_g(torch.IntTensor([speaker_id])).unsqueeze(-1)
+                g_src.numpy().astype(np.float32).tofile("../models/g_src.bin")
+                g_dst = torch.from_numpy(np.fromfile("../models/g_dst.bin", dtype=np.float32).reshape((1, 256, 1)))
 
-                z_p, audio_len = self.model.enc_forward(
+                z_p, _, audio_len = self.model.enc_forward(
                     phones,
                     tones,
                     lang_ids,
-                    g
+                    g_src
                 )
                 audio_len = audio_len.item()
 
@@ -249,7 +255,9 @@ class TTS(nn.Module):
                     if z_p_slice.size(-1) < dec_len:
                         z_p_slice = F.pad(z_p_slice, (0, dec_len - z_p_slice.size(-1)), mode="constant", value=0)
 
-                    audio = self.model.flow_dec_forward(z_p_slice, g)
+                    z = self.model.flow_forward(z_p_slice, g_src)
+
+                    audio = self.model.flow_dec_forward(z, g_dst)
                     audio = audio[0, 0].data.cpu().float().numpy()
                     sub_audio_len += audio.shape[-1]
 

@@ -1160,11 +1160,12 @@ class SynthesizerTrn(nn.Module):
         # print(f"z_p.size: {z_p.size()}")
         return z_p, w_ceil.int().view(-1), 512 * y_lengths.int()
     
-    def flow_forward(self, z_p, y_mask, g):
+    def flow_forward(self, z_p, g):
         # z_p: (1, 192, -1)
         # y_mask: (1, -1)
         # g: (1, 256, 1)
-        z = self.flow(z_p, y_mask, g, reverse=True)
+        y_mask = torch.ones(1, z_p.size(-1), dtype=torch.float32)
+        z = self.flow(z_p, y_mask, g)
         # return z * y_mask
         return z
     
