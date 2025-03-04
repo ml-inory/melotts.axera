@@ -30,7 +30,7 @@ update-locale LANG=C.utf8
 #### Requirements
 
 ```
-apt-get install libsndfile1-dev ibmecab-dev
+apt-get install libsndfile1-dev libmecab-dev
 mkdir /opt/site-packages 
 pip3 install -r requirements.txt --prefix=/opt/site-packages
 ```
