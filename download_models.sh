@@ -5,3 +5,6 @@ wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/encoder-en
 wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-zh.axmodel
 wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-jp.axmodel
 wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-en.axmodel
+wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-zh.onnx
+wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-jp.onnx
+wget https://github.com/ml-inory/melotts.axera/releases/download/v1.0/decoder-en.onnx
