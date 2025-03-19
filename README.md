@@ -30,7 +30,7 @@ update-locale LANG=C.utf8
 #### Requirements
 
 ```
-cp -rf nltk_data /root
+cp -rf nltk_data ~/
 apt-get install libsndfile1-dev libmecab-dev
 mkdir /opt/site-packages
 cd python
