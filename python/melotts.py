@@ -4,7 +4,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import numpy as np
 import soundfile
 import onnxruntime as ort
-from axengine import InferenceSession
+import axengine as axe
 import argparse
 import time
 from split_utils import split_sentence
@@ -157,7 +157,7 @@ def main():
     # Load models
     start = time.time()
     sess_enc = ort.InferenceSession(enc_model, providers=["CPUExecutionProvider"], sess_options=ort.SessionOptions())
-    sess_dec = InferenceSession.load_from_model(dec_model)
+    sess_dec = axe.InferenceSession(dec_model)
     print(f"load models take {1000 * (time.time() - start)}ms")
 
     # Load static input
@@ -205,9 +205,9 @@ def main():
                 zp_slice = np.concatenate((zp_slice, np.zeros((*zp_slice.shape[:-1], dec_len - zp_slice.shape[-1]), dtype=np.float32)), axis=-1)
 
             start = time.time()
-            audio = sess_dec.run(input_feed={"z_p": zp_slice,
+            audio = sess_dec.run(None, input_feed={"z_p": zp_slice,
                                 "g": g
-                                })["audio"].flatten()
+                                })[0].flatten()
             
             # 处理overlap
             audio_start = 0
