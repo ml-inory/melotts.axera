@@ -32,18 +32,16 @@ update-locale LANG=C.utf8
 ```
 cp -rf nltk_data /root
 apt-get install libsndfile1-dev libmecab-dev
-mkdir /opt/site-packages 
-pip3 install -r requirements.txt --prefix=/opt/site-packages
+mkdir /opt/site-packages
+cd python
+pip3 install -r requirements.txt
 ```
 
-#### 添加环境变量
+#### pyaxengine
 
-将以下两行添加到 `/root/.bashrc`(实际添加的路径需要自行检查)后，重新连接终端或者执行 `source ~/.bashrc`
+pyaxengine 是 npu 的 python api，详细安装请参考
 
-```
-export PYTHONPATH=$PYTHONPATH:/opt/site-packages/local/lib/python3.10/dist-packages  
-export PATH=$PATH:/opt/site-packages/local/bin
-``` 
+- https://github.com/AXERA-TECH/pyaxengine 
 
 #### 运行
 
