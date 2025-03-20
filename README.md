@@ -32,7 +32,6 @@ update-locale LANG=C.utf8
 ```
 cp -rf nltk_data ~/
 apt-get install libsndfile1-dev libmecab-dev
-mkdir /opt/site-packages
 cd python
 pip3 install -r requirements.txt
 ```
