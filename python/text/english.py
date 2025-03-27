@@ -1,21 +1,32 @@
-import pickle
 import os
 import re
-from g2p_en import G2p
+import time
+import pickle
+
+start = time.time()
+# from g2p_en import G2p
+from phonemizer import phonemize
+# phones = phonemize("hello", language='en-us')
+print(f"import g2p_en take {time.time() - start}s")
 
 from . import symbols
 
+start = time.time()
 from .english_utils.abbreviations import expand_abbreviations
 from .english_utils.time_norm import expand_time_english
 from .english_utils.number_norm import normalize_numbers
 # from .japanese import distribute_phone
+print(f"import english_utils take {time.time() - start}s")
 
-from transformers import AutoTokenizer
+start = time.time()
+# from transformers import AutoTokenizer
+from .fast_tokenizer import FastTokenizer
+print(f"import AutoTokenizer take {time.time() - start}s")
 
 current_file_path = os.path.dirname(__file__)
 CMU_DICT_PATH = os.path.join(current_file_path, "cmudict.rep")
-CACHE_PATH = os.path.join(current_file_path, "cmudict_cache.pickle")
-_g2p = G2p()
+CACHE_PATH = "/tmp/cmudict_cache.pickle"
+# _g2p = G2p()
 
 arpa = {
     "AH0",
@@ -141,7 +152,7 @@ def read_dict():
 
 def cache_dict(g2p_dict, file_path):
     with open(file_path, "wb") as pickle_file:
-        pickle.dump(g2p_dict, pickle_file)
+        pickle.dump(g2p_dict, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def get_dict():
@@ -155,7 +166,9 @@ def get_dict():
     return g2p_dict
 
 
+start = time.time()
 eng_dict = get_dict()
+print(f"eng_dict take {time.time() - start}s")
 
 
 def refine_ph(phn):
@@ -186,11 +199,9 @@ def text_normalize(text):
     return text
 
 model_id = 'bert-base-uncased'
-if not os.path.exists(model_id):
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.save_pretrained(f"./{model_id}")
-else:
-    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=f"./{model_id}")
+model_cache_path = os.path.join(current_file_path, model_id)
+tokenizer = FastTokenizer(f"{model_cache_path}/tokenizer.json")
+    
 def g2p_old(text):
     tokenized = tokenizer.tokenize(text)
     # import pdb; pdb.set_trace()
@@ -253,7 +264,9 @@ def g2p(text, pad_start_end=True, tokenized=None):
             tones += tns
             phone_len += len(phns)
         else:
-            phone_list = list(filter(lambda p: p != " ", _g2p(w)))
+            # phone_list = list(filter(lambda p: p != " ", _g2p(w)))
+            phone_list = list(filter(lambda p: p != " ", phonemize(w, language='en-us')))
+            
             for ph in phone_list:
                 if ph in arpa:
                     ph, tn = refine_ph(ph)

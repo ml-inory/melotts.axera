@@ -4,7 +4,8 @@ import re
 import unicodedata
 import os
 
-from transformers import AutoTokenizer
+# from transformers import AutoTokenizer
+from .jp_tokenizer import JapaneseTokenizer
 
 from . import symbols
 punctuation = ["!", "?", "…", ",", ".", "'", "-"]
@@ -14,6 +15,8 @@ try:
 except ImportError as e:
     raise ImportError("Japanese requires mecab-python3 and unidic-lite.") from e
 from num2words import num2words
+
+current_file_path = os.path.dirname(__file__)
 
 _CONVRULES = [
     # Conversion of 2 letters
@@ -567,12 +570,16 @@ def distribute_phone(n_phone, n_word):
 
 # tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
 
-model_id = 'tohoku-nlp/bert-base-japanese-v3'
-if not os.path.exists(model_id):
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.save_pretrained(model_id)
-else:    
-    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=f"./{model_id}")
+model_id = 'cl-tohoku/bert-base-japanese-v3'
+model_cache_path = os.path.join(current_file_path, model_id)
+# AutoTokenizer.from_pretrained(model_id,
+#                             use_fast=True,  # 启用快速实现（基于 Rust）
+#                             device_map="auto"  # 允许按需加载部分数据
+#                             ).save_pretrained(model_cache_path)
+tokenizer = JapaneseTokenizer(
+    model_cache_path
+)
+
 def g2p(norm_text):
 
     tokenized = tokenizer.tokenize(norm_text)

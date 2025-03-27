@@ -13,9 +13,6 @@ pinyin_to_symbol_map = {
     for line in open(os.path.join(current_file_path, "opencpop-strict.txt")).readlines()
 }
 
-import jieba.posseg as psg
-
-
 rep_map = {
     "：": ",",
     "；": ",",
@@ -91,6 +88,8 @@ def _get_initials_finals(word):
 
 
 def _g2p(segments):
+    import jieba.posseg as psg
+    
     phones_list = []
     tones_list = []
     word2ph = []

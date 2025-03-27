@@ -1,25 +1,18 @@
-""" from https://github.com/keithito/tacotron """
-
 import re
 from typing import Dict
+from num2words import num2words
 
-import inflect
-
-_inflect = inflect.engine()
 _comma_number_re = re.compile(r"([0-9][0-9\,]+[0-9])")
 _decimal_number_re = re.compile(r"([0-9]+\.[0-9]+)")
 _currency_re = re.compile(r"(£|\$|¥)([0-9\,\.]*[0-9]+)")
 _ordinal_re = re.compile(r"[0-9]+(st|nd|rd|th)")
 _number_re = re.compile(r"-?[0-9]+")
 
-
 def _remove_commas(m):
     return m.group(1).replace(",", "")
 
-
 def _expand_decimal_point(m):
     return m.group(1).replace(".", " point ")
-
 
 def __expand_currency(value: str, inflection: Dict[float, str]) -> str:
     parts = value.replace(",", "").split(".")
@@ -37,7 +30,6 @@ def __expand_currency(value: str, inflection: Dict[float, str]) -> str:
     if len(text) == 0:
         return f"zero {inflection[2]}"
     return " ".join(text)
-
 
 def _expand_currency(m: "re.Match") -> str:
     currencies = {
@@ -60,7 +52,6 @@ def _expand_currency(m: "re.Match") -> str:
             2: "pounds sterling",
         },
         "¥": {
-            # TODO rin
             0.02: "sen",
             2: "yen",
         },
@@ -70,10 +61,8 @@ def _expand_currency(m: "re.Match") -> str:
     value = m.group(2)
     return __expand_currency(value, currency)
 
-
 def _expand_ordinal(m):
-    return _inflect.number_to_words(m.group(0))
-
+    return num2words(int(m.group(0)), to='ordinal')
 
 def _expand_number(m):
     num = int(m.group(0))
@@ -81,12 +70,12 @@ def _expand_number(m):
         if num == 2000:
             return "two thousand"
         if 2000 < num < 2010:
-            return "two thousand " + _inflect.number_to_words(num % 100)
+            return "two thousand " + num2words(num % 100)
         if num % 100 == 0:
-            return _inflect.number_to_words(num // 100) + " hundred"
-        return _inflect.number_to_words(num, andword="", zero="oh", group=2).replace(", ", " ")
-    return _inflect.number_to_words(num, andword="")
-
+            return num2words(num // 100) + " hundred"
+        words = num2words(num)
+        return words.replace(" and ", " ").replace(",", "")
+    return num2words(num)
 
 def normalize_numbers(text):
     text = re.sub(_comma_number_re, _remove_commas, text)
