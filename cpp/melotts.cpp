@@ -22,6 +22,7 @@
 #include "EngineWrapper.hpp"
 #include "AudioFile.h"
 #include "Lexicon.hpp"
+#include "split_utils.hpp"
 
 static std::vector<int> intersperse(const std::vector<int>& lst, int item) {
     std::vector<int> result(lst.size() * 2 + 1, item);
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
     cmd.add<std::string>("lexicon", 'l', "lexicon.txt", false, "../models/lexicon.txt");
     cmd.add<std::string>("token", 't', "tokens.txt", false, "../models/tokens.txt");
     cmd.add<std::string>("g", 0, "g.bin", false, "../models/g-zh_mix_en.bin");
+    cmd.add<std::string>("language", 0, "language, choose from ZH, EN, JP", false, "ZH");
 
     cmd.add<std::string>("sentence", 's', "input sentence", false, "爱芯元智半导体股份有限公司，致力于打造世界领先的人工智能感知与边缘计算芯片。服务智慧城市、智能驾驶、机器人的海量普惠的应用");
     cmd.add<std::string>("wav", 'w', "wav file", false, "output.wav");
@@ -66,6 +68,7 @@ int main(int argc, char** argv) {
     auto lexicon_file   = cmd.get<std::string>("lexicon");
     auto token_file     = cmd.get<std::string>("token");
     auto g_file         = cmd.get<std::string>("g");
+    auto language       = cmd.get<std::string>("language");
 
     auto sentence       = cmd.get<std::string>("sentence");
     auto wav_file       = cmd.get<std::string>("wav");
@@ -77,6 +80,7 @@ int main(int argc, char** argv) {
     printf("decoder: %s\n", decoder_file.c_str());
     printf("lexicon: %s\n", lexicon_file.c_str());
     printf("token: %s\n", token_file.c_str());
+    printf("language: %s\n", language.c_str());
     printf("sentence: %s\n", sentence.c_str());
     printf("wav: %s\n", wav_file.c_str());
     printf("speed: %f\n", speed);
@@ -99,22 +103,6 @@ int main(int argc, char** argv) {
 
     // Load lexicon
     Lexicon lexicon(lexicon_file, token_file);
-
-    // Convert sentence to phones and tones
-    std::vector<int> phones_bef, tones_bef;
-    lexicon.convert(sentence, phones_bef, tones_bef);
-
-    // for (auto p : phones_bef) {
-    //     printf("%d ", p);
-    // }
-    // printf("\n");
-
-    // Add blank between words
-    auto phones = intersperse(phones_bef, 0);
-    auto tones = intersperse(tones_bef, 0);
-    int phone_len = phones.size();
-
-    std::vector<int> langids(phone_len, 3);
 
     // Read g.bin
     std::vector<float> g(256, 0);
@@ -146,58 +134,69 @@ int main(int argc, char** argv) {
     end = get_current_time();
     printf("Load decoder take %.2f ms\n", (end - start));	
 
-    float noise_scale   = 0.3f;
+    float noise_scale   = 0.0f;
     float length_scale  = 1.0 / speed;
-    float noise_scale_w = 0.6f;
-    float sdp_ratio     = 0.2f;
-	
-    start = get_current_time();
-    auto encoder_output = encoder.Run(phones, tones, langids, g, noise_scale, noise_scale_w, length_scale, sdp_ratio);
-    float* zp_data = encoder_output.at(0).GetTensorMutableData<float>();
-    int audio_len = encoder_output.at(2).GetTensorMutableData<int>()[0];
-    auto zp_info = encoder_output.at(0).GetTensorTypeAndShapeInfo();
-    auto zp_shape = zp_info.GetShape();
-    end = get_current_time();
-    printf("Encoder run take %.2f ms\n", (end - start));		
+    float noise_scale_w = 0.0f;
+    float sdp_ratio     = 0.0f;
 
-	/*
-    printf("Load decoder model\n");
-    EngineWrapper decoder_model;
-    if (0 != decoder_model.Init(decoder_file.c_str())) {
-        printf("Init decoder model failed!\n");
-        return -1;
-    }
-	*/
-
-    int zp_size = decoder_model.GetInputSize(0) / sizeof(float);
-    int dec_len = zp_size / zp_shape[1];
-    int audio_slice_len = decoder_model.GetOutputSize(0) / sizeof(float);
-    std::vector<float> decoder_output(audio_slice_len);
-
-    int dec_slice_num = int(std::ceil(zp_shape[2] * 1.0 / dec_len));
+    // Split sentences
+    auto sens = split_sentence(sentence, 10, language);
     std::vector<float> wavlist;
-    start = get_current_time();
-    for (int i = 0; i < dec_slice_num; i++) {
-        std::vector<float> zp(zp_size, 0);
-        int actual_size = (i + 1) * dec_len < zp_shape[2] ? dec_len : zp_shape[2] - i * dec_len;
-        for (int n = 0; n < zp_shape[1]; n++) {
-            memcpy(zp.data() + n * dec_len, zp_data + n * zp_shape[2] + i * dec_len, sizeof(float) * actual_size);
-        }
 
-        decoder_model.SetInput(zp.data(), 0);
-        decoder_model.SetInput(g.data(), 1);
-        if (0 != decoder_model.RunSync()) {
-            printf("Run decoder model failed!\n");
-            return -1;
-        }
-        decoder_model.GetOutput(decoder_output.data(), 0);
+    for (auto& se : sens) {
+        printf("Split sentence: %s\n", se.c_str());
+        // Convert sentence to phones and tones
+        std::vector<int> phones_bef, tones_bef;
+        lexicon.convert(se, phones_bef, tones_bef);
+
+        // Add blank between words
+        auto phones = intersperse(phones_bef, 0);
+        auto tones = intersperse(tones_bef, 0);
+        int phone_len = phones.size();
+
+        std::vector<int> langids(phone_len, 3);
         
-        actual_size = (i + 1) * audio_slice_len < audio_len ? audio_slice_len : audio_len - i * audio_slice_len;
-        wavlist.insert(wavlist.end(), decoder_output.begin(), decoder_output.begin() + actual_size);
+        start = get_current_time();
+        auto encoder_output = encoder.Run(phones, tones, langids, g, noise_scale, noise_scale_w, length_scale, sdp_ratio);
+        float* zp_data = encoder_output.at(0).GetTensorMutableData<float>();
+        int audio_len = encoder_output.at(2).GetTensorMutableData<int>()[0];
+        auto zp_info = encoder_output.at(0).GetTensorTypeAndShapeInfo();
+        auto zp_shape = zp_info.GetShape();
+        end = get_current_time();
+        printf("Encoder run take %.2f ms\n", (end - start));		
+
+        int zp_size = decoder_model.GetInputSize(0) / sizeof(float);
+        int dec_len = zp_size / zp_shape[1];
+        int audio_slice_len = decoder_model.GetOutputSize(0) / sizeof(float);
+        std::vector<float> decoder_output(audio_slice_len);
+
+        int dec_slice_num = int(std::ceil(zp_shape[2] * 1.0 / dec_len));
+        
+        start = get_current_time();
+
+        for (int i = 0; i < dec_slice_num; i++) {
+            std::vector<float> zp(zp_size, 0);
+            int actual_size = (i + 1) * dec_len < zp_shape[2] ? dec_len : zp_shape[2] - i * dec_len;
+            for (int n = 0; n < zp_shape[1]; n++) {
+                memcpy(zp.data() + n * dec_len, zp_data + n * zp_shape[2] + i * dec_len, sizeof(float) * actual_size);
+            }
+
+            decoder_model.SetInput(zp.data(), 0);
+            decoder_model.SetInput(g.data(), 1);
+            if (0 != decoder_model.RunSync()) {
+                printf("Run decoder model failed!\n");
+                return -1;
+            }
+            decoder_model.GetOutput(decoder_output.data(), 0);
+            
+            actual_size = (i + 1) * audio_slice_len < audio_len ? audio_slice_len : audio_len - i * audio_slice_len;
+            wavlist.insert(wavlist.end(), decoder_output.begin(), decoder_output.begin() + actual_size);
+        }
+        end = get_current_time();
+        printf("Decoder run %d times take %.2f ms\n", (end - start), dec_slice_num);	
     }
-    end = get_current_time();
-    printf("Decoder run %d times take %.2f ms\n", (end - start), dec_slice_num);	
-    printf("wav len: %d\n", wavlist.size());
+
+    
     AudioFile<float> audio_file;
     std::vector<std::vector<float> > audio_samples{wavlist};
     audio_file.setAudioBuffer(audio_samples);
