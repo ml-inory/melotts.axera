@@ -111,11 +111,11 @@ pair<vector<Slice>, vector<Slice>> generate_slices(const vector<int>& word2prono
 
 int main(int argc, char** argv) {
     cmdline::parser cmd;
-    cmd.add<std::string>("encoder", 'e', "encoder onnx", false, "../models/encoder-zh.onnx");
-    cmd.add<std::string>("decoder", 'd', "decoder axmodel", false, "../models/decoder-zh.axmodel");
+    cmd.add<std::string>("encoder", 'e', "encoder onnx", false, "");
+    cmd.add<std::string>("decoder", 'd', "decoder axmodel", false, "");
     cmd.add<std::string>("lexicon", 'l', "lexicon.txt", false, "../models/lexicon.txt");
     cmd.add<std::string>("token", 't', "tokens.txt", false, "../models/tokens.txt");
-    cmd.add<std::string>("g", 0, "g.bin", false, "../models/g-zh_mix_en.bin");
+    cmd.add<std::string>("g", 0, "g.bin", false, "");
     cmd.add<std::string>("language", 0, "language, choose from ZH, EN, JP", false, "ZH");
 
     cmd.add<std::string>("sentence", 's', "input sentence", false, "爱芯元智半导体股份有限公司，致力于打造世界领先的人工智能感知与边缘计算芯片。服务智慧城市、智能驾驶、机器人的海量普惠的应用");
@@ -138,10 +138,28 @@ int main(int argc, char** argv) {
     auto speed          = cmd.get<float>("speed");
     auto sample_rate    = cmd.get<int>("sample_rate");
 
+    std::string lower_lang = language;
+    std::transform(language.begin(), language.end(), lower_lang.begin(),
+        [](unsigned char c){ return std::tolower(c); });
+    if (encoder_file.empty()) {
+        encoder_file = "../models/encoder-" + lower_lang + ".onnx";
+    }
+    if (decoder_file.empty()) {
+        decoder_file = "../models/decoder-" + lower_lang + ".axmodel";
+    }
+    if (g_file.empty()) {
+        if (lower_lang == "zh") {
+            g_file = "../models/g-zh_mix_en.bin";
+        } else {
+            g_file = "../models/g-" + lower_lang + ".bin";
+        }
+    }
+
     printf("encoder: %s\n", encoder_file.c_str());
     printf("decoder: %s\n", decoder_file.c_str());
     printf("lexicon: %s\n", lexicon_file.c_str());
     printf("token: %s\n", token_file.c_str());
+    printf("g: %s\n", g_file.c_str());
     printf("language: %s\n", language.c_str());
     printf("sentence: %s\n", sentence.c_str());
     printf("wav: %s\n", wav_file.c_str());
@@ -206,7 +224,7 @@ int main(int argc, char** argv) {
     std::vector<float> wavlist;
 
     for (auto& se : sens) {
-        printf("Split sentence: %s\n", se.c_str());
+        printf("\nSplit sentence: %s\n", se.c_str());
         // Convert sentence to phones and tones
         std::vector<int> phones_bef, tones_bef, word2ph;
         lexicon.convert(se, phones_bef, tones_bef, word2ph);
