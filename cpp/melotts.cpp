@@ -15,6 +15,7 @@
 #include <cmath>
 #include <ctime>
 #include <sys/time.h>
+#include <numeric>
 
 #include "cmdline.hpp"
 #include "OnnxWrapper.hpp"
@@ -23,6 +24,8 @@
 #include "AudioFile.h"
 #include "Lexicon.hpp"
 #include "split_utils.hpp"
+
+using namespace std;
 
 static std::vector<int> intersperse(const std::vector<int>& lst, int item) {
     std::vector<int> result(lst.size() * 2 + 1, item);
@@ -45,6 +48,65 @@ static double get_current_time()
     gettimeofday(&tv, NULL);
 
     return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+}
+
+
+// 计算每个词的发音时长
+vector<int> calc_word2pronoun(const vector<int>& word2ph, const vector<int>& pronoun_lens) {
+    vector<int> indice = {0};
+    for (size_t i = 0; i < word2ph.size() - 1; ++i) {
+        indice.push_back(indice.back() + word2ph[i]);
+    }
+    
+    vector<int> word2pronoun;
+    for (size_t i = 0; i < word2ph.size(); ++i) {
+        int start = indice[i];
+        int end = start + word2ph[i];
+        int sum = accumulate(pronoun_lens.begin() + start, pronoun_lens.begin() + end, 0);
+        word2pronoun.push_back(sum);
+    }
+    return word2pronoun;
+}
+
+struct Slice {
+    int start;
+    int end;
+    Slice(int s, int e) : start(s), end(e) {}
+};
+
+// 生成有overlap的slice，slice索引是对于zp的
+pair<vector<Slice>, vector<Slice>> generate_slices(const vector<int>& word2pronoun, int dec_len) {
+    int pn_start = 0, pn_end = 0;
+    int zp_start = 0, zp_end = 0;
+    int zp_len = 0;
+    vector<Slice> pn_slices;
+    vector<Slice> zp_slices;
+    
+    while (pn_end < static_cast<int>(word2pronoun.size())) {
+        // 检查是否可以向前overlap两个字
+        if (pn_end - pn_start > 2 && 
+            accumulate(word2pronoun.begin() + pn_end - 2, word2pronoun.begin() + pn_end + 1, 0) <= dec_len) {
+            zp_len = accumulate(word2pronoun.begin() + pn_end - 2, word2pronoun.begin() + pn_end, 0);
+            zp_start = zp_end - zp_len;
+            pn_start = pn_end - 2;
+        } else {
+            zp_len = 0;
+            zp_start = zp_end;
+            pn_start = pn_end;
+        }
+        
+        while (pn_end < static_cast<int>(word2pronoun.size()) && 
+               zp_len + word2pronoun[pn_end] <= dec_len) {
+            zp_len += word2pronoun[pn_end];
+            pn_end++;
+        }
+        
+        zp_end = zp_start + zp_len;
+        pn_slices.emplace_back(pn_start, pn_end);
+        zp_slices.emplace_back(zp_start, zp_end);
+    }
+    
+    return make_pair(pn_slices, zp_slices);
 }
 
 int main(int argc, char** argv) {
@@ -134,10 +196,10 @@ int main(int argc, char** argv) {
     end = get_current_time();
     printf("Load decoder take %.2f ms\n", (end - start));	
 
-    float noise_scale   = 0.0f;
+    float noise_scale   = 0.3f;
     float length_scale  = 1.0 / speed;
-    float noise_scale_w = 0.0f;
-    float sdp_ratio     = 0.0f;
+    float noise_scale_w = 0.6f;
+    float sdp_ratio     = 0.2f;
 
     // Split sentences
     auto sens = split_sentence(sentence, 10, language);
@@ -146,52 +208,105 @@ int main(int argc, char** argv) {
     for (auto& se : sens) {
         printf("Split sentence: %s\n", se.c_str());
         // Convert sentence to phones and tones
-        std::vector<int> phones_bef, tones_bef;
-        lexicon.convert(se, phones_bef, tones_bef);
+        std::vector<int> phones_bef, tones_bef, word2ph;
+        lexicon.convert(se, phones_bef, tones_bef, word2ph);
 
         // Add blank between words
         auto phones = intersperse(phones_bef, 0);
         auto tones = intersperse(tones_bef, 0);
+        for (int& i : word2ph) {
+            i *= 2;
+        }
+        if (!word2ph.empty())
+            word2ph[0] += 1;
+
         int phone_len = phones.size();
 
         std::vector<int> langids(phone_len, 3);
         
+        // Run encoder
         start = get_current_time();
         auto encoder_output = encoder.Run(phones, tones, langids, g, noise_scale, noise_scale_w, length_scale, sdp_ratio);
         float* zp_data = encoder_output.at(0).GetTensorMutableData<float>();
+        int* pronoun_lens_data = encoder_output.at(1).GetTensorMutableData<int>();
         int audio_len = encoder_output.at(2).GetTensorMutableData<int>()[0];
         auto zp_info = encoder_output.at(0).GetTensorTypeAndShapeInfo();
         auto zp_shape = zp_info.GetShape();
+        std::vector<int> pronoun_lens(pronoun_lens_data, pronoun_lens_data + phone_len);
         end = get_current_time();
-        printf("Encoder run take %.2f ms\n", (end - start));		
+        printf("Encoder run take %.2f ms\n", (end - start));
 
         int zp_size = decoder_model.GetInputSize(0) / sizeof(float);
         int dec_len = zp_size / zp_shape[1];
         int audio_slice_len = decoder_model.GetOutputSize(0) / sizeof(float);
         std::vector<float> decoder_output(audio_slice_len);
 
-        int dec_slice_num = int(std::ceil(zp_shape[2] * 1.0 / dec_len));
+        // Generate pronoun slices for better effect
+        auto word2pronoun = calc_word2pronoun(word2ph, pronoun_lens);
+        auto dec_slices = generate_slices(word2pronoun, dec_len);
+
+        // int dec_slice_num = int(std::ceil(zp_shape[2] * 1.0 / dec_len));
+        size_t dec_slice_num = dec_slices.first.size();
         
+        // Iteratively run decoder
         start = get_current_time();
 
-        for (int i = 0; i < dec_slice_num; i++) {
-            std::vector<float> zp(zp_size, 0);
-            int actual_size = (i + 1) * dec_len < zp_shape[2] ? dec_len : zp_shape[2] - i * dec_len;
+        for (size_t i = 0; i < dec_slice_num; i++) {
+            const Slice& ps = dec_slices.first[i];
+            const Slice& zs = dec_slices.second[i];
+
+            std::vector<float> zp_slice(zp_size, 0);
+            int actual_size = std::min(zs.end - zs.start, dec_len);
             for (int n = 0; n < zp_shape[1]; n++) {
-                memcpy(zp.data() + n * dec_len, zp_data + n * zp_shape[2] + i * dec_len, sizeof(float) * actual_size);
+                memcpy(zp_slice.data() + n * dec_len, zp_data + n * zp_shape[2] + zs.start, sizeof(float) * actual_size);
             }
 
-            decoder_model.SetInput(zp.data(), 0);
+            // 输出音频的长度
+            int sub_audio_len = 512 * actual_size;
+
+            decoder_model.SetInput(zp_slice.data(), 0);
             decoder_model.SetInput(g.data(), 1);
             if (0 != decoder_model.RunSync()) {
                 printf("Run decoder model failed!\n");
                 return -1;
             }
             decoder_model.GetOutput(decoder_output.data(), 0);
-            
-            actual_size = (i + 1) * audio_slice_len < audio_len ? audio_slice_len : audio_len - i * audio_slice_len;
-            wavlist.insert(wavlist.end(), decoder_output.begin(), decoder_output.begin() + actual_size);
+
+            // 处理overlap
+            int audio_start = 0;
+            if (!wavlist.empty())
+                if (dec_slices.first[i - 1].end > ps.start)
+                    // 去掉第一个字
+                    audio_start = 512 * word2pronoun[ps.start];
+
+            int audio_end = sub_audio_len;
+            if (i < dec_slices.first.size() - 1)
+                if (ps.end > dec_slices.first[i + 1].start)
+                    // 去掉最后一个字
+                    audio_end = sub_audio_len - 512 * word2pronoun[ps.end - 1];
+
+            wavlist.insert(wavlist.end(), decoder_output.begin() + audio_start, decoder_output.begin() + audio_end);
         }
+
+        // for (int i = 0; i < dec_slice_num; i++) {
+        //     std::vector<float> zp(zp_size, 0);
+        //     int actual_size = (i + 1) * dec_len < zp_shape[2] ? dec_len : zp_shape[2] - i * dec_len;
+        //     for (int n = 0; n < zp_shape[1]; n++) {
+        //         memcpy(zp.data() + n * dec_len, zp_data + n * zp_shape[2] + i * dec_len, sizeof(float) * actual_size);
+        //     }
+
+        //     decoder_model.SetInput(zp.data(), 0);
+        //     decoder_model.SetInput(g.data(), 1);
+        //     if (0 != decoder_model.RunSync()) {
+        //         printf("Run decoder model failed!\n");
+        //         return -1;
+        //     }
+        //     decoder_model.GetOutput(decoder_output.data(), 0);
+            
+        //     actual_size = (i + 1) * audio_slice_len < audio_len ? audio_slice_len : audio_len - i * audio_slice_len;
+        //     wavlist.insert(wavlist.end(), decoder_output.begin(), decoder_output.begin() + actual_size);
+        // }
+
         end = get_current_time();
         printf("Decoder run %d times take %.2f ms\n", (end - start), dec_slice_num);	
     }

@@ -127,7 +127,7 @@ public:
         return words;
     }
 
-    void convert(const std::string& text, std::vector<int>& phones, std::vector<int>& tones) {
+    void convert(const std::string& text, std::vector<int>& phones, std::vector<int>& tones, std::vector<int>& word2ph) {
         auto splitted_text = splitEachChar(text);
         auto zh_mix_en = merge_english(splitted_text);
         for (auto c : zh_mix_en) {
@@ -147,6 +147,7 @@ public:
             }
             phones.insert(phones.end(), phones_and_tones.first.begin(), phones_and_tones.first.end());
             tones.insert(tones.end(), phones_and_tones.second.begin(), phones_and_tones.second.end());
+            word2ph.push_back(phones_and_tones.first.size());
         }
     }
 };
