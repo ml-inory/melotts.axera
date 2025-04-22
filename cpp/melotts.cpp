@@ -284,7 +284,7 @@ int main(int argc, char** argv) {
 
             decoder_model.SetInput(zp_slice.data(), 0);
             decoder_model.SetInput(g.data(), 1);
-            if (0 != decoder_model.RunSync()) {
+            if (0 != decoder_model.Run()) {
                 printf("Run decoder model failed!\n");
                 return -1;
             }
