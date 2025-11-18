@@ -1,2 +1,5 @@
 __pycache__
 .vscode
+models/decoder-ax650/*.axmodel
+models/encoder-onnx/*.onnx
+python/*.wav
