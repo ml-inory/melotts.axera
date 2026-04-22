@@ -1,0 +1,21 @@
+{
+  "language": "KR",
+  "lang_id": 2,
+  "upsample_factor": 512,
+  "buckets": [
+    256,
+    512,
+    1024,
+    1536
+  ],
+  "encoder": "encoder-sherpa-kr.onnx",
+  "decoder_pattern": "decoder-b{N}-kr.onnx",
+  "runtime_steps": [
+    "z_p, g = encoder.Run(x, x_lengths, tones, sid, noise_scale, length_scale, noise_scale_w)",
+    "z_len = z_p.shape[2]",
+    "B = min(b for b in buckets if b >= z_len)",
+    "z_p_padded = zero_pad_right(z_p, B)  // right-pad on dim 2",
+    "audio = decoder_bB.Run(z_p_padded, g)[:, :, :z_len * 512]  // trim"
+  ],
+  "note": "No overlap slicing. No pronoun_lens/audio_len dependency. Single pad + single trim."
+}
