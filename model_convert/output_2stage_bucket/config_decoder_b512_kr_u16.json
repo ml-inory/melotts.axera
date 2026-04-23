@@ -5,27 +5,30 @@
     "input_configs": [
       {
         "tensor_name": "z_p",
-        "calibration_dataset": "./calibration_dataset/z_p.tar.gz",
+        "calibration_dataset": "./output_2stage_bucket/calib_b512_zp.tar.gz",
         "calibration_size": -1,
         "calibration_format": "Numpy"
       },
       {
-          "tensor_name": "g",
-          "calibration_dataset": "./calibration_dataset/g.tar.gz",
-          "calibration_size": -1,
-          "calibration_format": "Numpy"
+        "tensor_name": "g",
+        "calibration_dataset": "./output_2stage_bucket/calib_b512_g.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
       }
     ],
-	
     "layer_configs": [
-    {
-        "start_tensor_names": ["DEFAULT"], 
-        "end_tensor_names": ["DEFAULT"], 
+      {
+        "start_tensor_names": [
+          "DEFAULT"
+        ],
+        "end_tensor_names": [
+          "DEFAULT"
+        ],
         "data_type": "U16"
-      } 
-	],
+      }
+    ],
     "precision_analysis": true,
-    "precision_analysis_method":"EndToEnd"
+    "precision_analysis_method": "EndToEnd"
   },
   "input_processors": [
     {

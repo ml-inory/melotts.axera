@@ -1,0 +1,35 @@
+{
+  "language": "KR",
+  "npu_mode": "NPU1",
+  "data_type": "U16",
+  "configs": [
+    {
+      "bucket": 256,
+      "onnx": "decoder-b256-kr.onnx",
+      "config": "config_decoder_b256_kr_u16.json",
+      "zp_tar": "calib_b256_zp.tar.gz",
+      "g_tar": "calib_b256_g.tar.gz"
+    },
+    {
+      "bucket": 512,
+      "onnx": "decoder-b512-kr.onnx",
+      "config": "config_decoder_b512_kr_u16.json",
+      "zp_tar": "calib_b512_zp.tar.gz",
+      "g_tar": "calib_b512_g.tar.gz"
+    },
+    {
+      "bucket": 1024,
+      "onnx": "decoder-b1024-kr.onnx",
+      "config": "config_decoder_b1024_kr_u16.json",
+      "zp_tar": "calib_b1024_zp.tar.gz",
+      "g_tar": "calib_b1024_g.tar.gz"
+    },
+    {
+      "bucket": 1536,
+      "onnx": "decoder-b1536-kr.onnx",
+      "config": "config_decoder_b1536_kr_u16.json",
+      "zp_tar": "calib_b1536_zp.tar.gz",
+      "g_tar": "calib_b1536_g.tar.gz"
+    }
+  ]
+}
