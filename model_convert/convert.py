@@ -83,21 +83,25 @@ def main():
         phone_len = 256
         phones = torch.zeros(phone_len, dtype=torch.int32)
         tones = torch.randint(1, 5, size=(phone_len,), dtype=torch.int32)
-        g = torch.rand(1, 256, 1)
         lang_ids = torch.zeros(phone_len, dtype=torch.int32) + 3
+        bert = torch.rand(1, 1024, phone_len)
+        ja_bert = torch.rand(1, 768, phone_len)
+        g = torch.rand(1, 256, 1)
         noise_scale = torch.FloatTensor([0.667])
         noise_scale_w = torch.FloatTensor([0.8])
         length_scale = torch.FloatTensor([1])
         sdp_ratio = torch.FloatTensor([0])
 
         inputs = (
-            phones, tones, lang_ids, g, noise_scale, noise_scale_w, length_scale, sdp_ratio
+            phones, tones, lang_ids, bert, ja_bert, g, noise_scale, noise_scale_w, length_scale, sdp_ratio
         )
-        input_names = ['phone','tone', 'language', 'g', 'noise_scale', 'noise_scale_w', 'length_scale', 'sdp_ratio']
+        input_names = ['phone', 'tone', 'language', 'bert', 'ja_bert', 'g', 'noise_scale', 'noise_scale_w', 'length_scale', 'sdp_ratio']
         dynamic_axes = {
             "phone": {0: "phone_len"},
             "tone": {0: "phone_len"},
             "language": {0: "phone_len"},
+            "bert": {2: "phone_len"},
+            "ja_bert": {2: "phone_len"},
         }
         # Export the model
         encoder_name = f"encoder-{lower_lang}.onnx"

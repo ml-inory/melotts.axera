@@ -6,7 +6,7 @@ import onnxruntime as ort
 import axengine as axe
 import time
 from split_utils import split_sentence
-from text import cleaned_text_to_sequence
+from text import cleaned_text_to_sequence, get_bert
 from text.cleaner import clean_text
 from symbols import LANG_TO_SYMBOL_MAP
 import re
@@ -16,21 +16,35 @@ def intersperse(lst, item):
     result[1::2] = lst
     return result
 
-def get_text_for_tts_infer(text, language_str, symbol_to_id=None):
+def get_text_for_tts_infer(text, language_str, symbol_to_id=None, use_bert=True, bert_device="cpu"):
     norm_text, phone, tone, word2ph = clean_text(text, language_str)
     phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
 
     phone = intersperse(phone, 0)
     tone = intersperse(tone, 0)
     language = intersperse(language, 0)
+    word2ph = [i * 2 for i in word2ph]
+    word2ph[0] += 1
+
+    if use_bert:
+        bert_feature = get_bert(norm_text, word2ph, language_str, bert_device)
+        assert bert_feature.shape[-1] == len(phone), phone
+        if language_str == "ZH":
+            bert = bert_feature.unsqueeze(0).numpy().astype(np.float32)
+            ja_bert = np.zeros((1, 768, len(phone)), dtype=np.float32)
+        else:
+            bert = np.zeros((1, 1024, len(phone)), dtype=np.float32)
+            ja_bert = bert_feature.unsqueeze(0).numpy().astype(np.float32)
+    else:
+        bert = np.zeros((1, 1024, len(phone)), dtype=np.float32)
+        ja_bert = np.zeros((1, 768, len(phone)), dtype=np.float32)
 
     phone = np.array(phone, dtype=np.int32)
     tone = np.array(tone, dtype=np.int32)
     language = np.array(language, dtype=np.int32)
-    word2ph = np.array(word2ph, dtype=np.int32) * 2
-    word2ph[0] += 1
+    word2ph = np.array(word2ph, dtype=np.int32)
 
-    return phone, tone, language, norm_text, word2ph
+    return phone, tone, language, norm_text, word2ph, bert, ja_bert
 
 def split_sentences_into_pieces(text, language, quiet=False):
     texts = split_sentence(text, language_str=language)
@@ -106,8 +120,8 @@ class MeloTTS:
         self.dec_len = dec_len
         self._symbol_to_id = {s: i for i, s in enumerate(LANG_TO_SYMBOL_MAP[language])}
 
-        
         self.sess_enc = ort.InferenceSession(enc_model, providers=["CPUExecutionProvider"], sess_options=ort.SessionOptions())
+        self.enc_input_names = {inp.name for inp in self.sess_enc.get_inputs()}
         self.sess_dec = axe.InferenceSession(dec_model)
         
         
@@ -123,17 +137,25 @@ class MeloTTS:
                 se = re.sub(r'([a-z])([A-Z])', r'\1 \2', se)
             print(f"\nSentence[{n}]: {se}")
             # Convert sentence to phones and tones
-            phones, tones, lang_ids, norm_text, word2ph = get_text_for_tts_infer(se, self.language, symbol_to_id=self._symbol_to_id)
+            use_bert = bool({"bert", "ja_bert"} & self.enc_input_names)
+            phones, tones, lang_ids, norm_text, word2ph, bert, ja_bert = get_text_for_tts_infer(
+                se, self.language, symbol_to_id=self._symbol_to_id, use_bert=use_bert
+            )
 
             start = time.time()
             # Run encoder
-            z_p, pronoun_lens, audio_len = self.sess_enc.run(None, input_feed={
+            enc_inputs = {
                                         'phone': phones, 'g': self.g,
-                                        'tone': tones, 'language': lang_ids, 
+                                        'tone': tones, 'language': lang_ids,
                                         'noise_scale': np.array([0], dtype=np.float32),
                                         'length_scale': np.array([1.0 / speed], dtype=np.float32),
                                         'noise_scale_w': np.array([0], dtype=np.float32),
-                                        'sdp_ratio': np.array([0], dtype=np.float32)})
+                                        'sdp_ratio': np.array([0], dtype=np.float32)}
+            if "bert" in self.enc_input_names:
+                enc_inputs["bert"] = bert
+            if "ja_bert" in self.enc_input_names:
+                enc_inputs["ja_bert"] = ja_bert
+            z_p, pronoun_lens, audio_len = self.sess_enc.run(None, input_feed=enc_inputs)
             print(f"encoder run take {1000 * (time.time() - start):.2f}ms")
 
             # 计算每个词的发音长度

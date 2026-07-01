@@ -3,3 +3,11 @@ __pycache__
 models/decoder-ax650/*.axmodel
 models/encoder-onnx/*.onnx
 python/*.wav
+*.onnx
+*.axmodel
+*.pth
+*.pt
+*.npy
+*.npz
+*.tar.gz
+model_convert/calibration_dataset/

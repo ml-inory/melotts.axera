@@ -1115,15 +1115,21 @@ class SynthesizerTrn(nn.Module):
         phone,
         tone,
         language,
-        g,
+        bert_or_g,
+        ja_bert=None,
+        g=None,
         noise_scale=0.667,
         noise_scale_w=0.8,
         length_scale=1.0,
         sdp_ratio=0.0
     ):
         phone_len = phone.size(-1)
-        bert = torch.zeros(1, 1024, phone_len)
-        ja_bert = torch.zeros(1, 768, phone_len)
+        if g is None:
+            g = bert_or_g
+            bert = torch.zeros(1, 1024, phone_len)
+            ja_bert = torch.zeros(1, 768, phone_len)
+        else:
+            bert = bert_or_g
 
         # sid = torch.IntTensor([1])
         # g = self.emb_g(sid).unsqueeze(-1)
