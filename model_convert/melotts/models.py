@@ -784,6 +784,7 @@ class SynthesizerTrn(nn.Module):
         num_tones=None,
         norm_refenc=False,
         dec_len = 128,
+        enc_max_len = 1024,
         **kwargs
     ):
         super().__init__()
@@ -819,6 +820,7 @@ class SynthesizerTrn(nn.Module):
         else:
             self.enc_gin_channels = 0
         self.dec_len = dec_len
+        self.enc_max_len = enc_max_len
 
         self.enc_p = TextEncoder(
             n_vocab,
@@ -1148,7 +1150,7 @@ class SynthesizerTrn(nn.Module):
         # print(f"w_ceil.size: {w_ceil.size()}")
 
         y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
-        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, None), 1).to(
+        y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, self.enc_max_len), 1).to(
             x_mask.dtype
         )
 

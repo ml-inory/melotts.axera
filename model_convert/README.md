@@ -27,6 +27,7 @@ python convert.py
 | --- | --- | --- |
 | -l/--language | 转换哪个语言的模型，目前支持EN, FR, JP, ES, ZH, KR，分别对应英语、法语、日语、西班牙语、中文、韩语 | ZH |
 | --dec_len | decoder输入长度 | 128 |
+| --enc_max_len | encoder 输出的 duration-expanded `z_p` 最大帧长 | 1024 |
 
 
 ## 转换模型(ONNX -> Axera)

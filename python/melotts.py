@@ -208,6 +208,13 @@ class MeloTTS:
             z_p, pronoun_lens, audio_len = self.sess_enc.run(None, input_feed=enc_inputs)
             print(f"encoder run take {1000 * (time.time() - start):.2f}ms")
 
+            required_zp_len = int(np.sum(pronoun_lens))
+            if required_zp_len > z_p.shape[-1]:
+                raise RuntimeError(
+                    f"encoder z_p length {z_p.shape[-1]} is shorter than duration-expanded "
+                    f"length {required_zp_len}; re-export encoder with a larger --enc_max_len"
+                )
+
             # 计算每个词的发音长度
             word2pronoun = calc_word2pronoun(word2ph, pronoun_lens)
             # 生成word2pronoun和zp的切片

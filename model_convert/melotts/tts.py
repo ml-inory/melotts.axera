@@ -67,7 +67,8 @@ class TTS(nn.Module):
                 device='auto',
                 use_hf=True,
                 config_path=None,
-                ckpt_path=None):
+                ckpt_path=None,
+                enc_max_len=1024):
         super().__init__()
         if device == 'auto':
             device = 'cpu'
@@ -91,6 +92,7 @@ class TTS(nn.Module):
             num_tones=num_tones,
             num_languages=num_languages,
             dec_len=dec_len,
+            enc_max_len=enc_max_len,
             **hps.model,
         ).to(device)
 

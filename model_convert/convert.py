@@ -37,6 +37,13 @@ def get_args():
         default=128,
         help="decoder input length",
     )
+    parser.add_argument(
+        "--enc_max_len",
+        type=int,
+        required=False,
+        default=1024,
+        help="maximum expanded encoder z_p frame length",
+    )
 
     args = parser.parse_args()
     return args
@@ -72,7 +79,14 @@ def main():
 
         print(f"speaker_id: {speaker_id}")
 
-    tts = TTS(language=language, dec_len=args.dec_len, config_path=config_path, ckpt_path=ckpt_path, device=device)
+    tts = TTS(
+        language=language,
+        dec_len=args.dec_len,
+        enc_max_len=args.enc_max_len,
+        config_path=config_path,
+        ckpt_path=ckpt_path,
+        device=device,
+    )
 
     print(f"Generating calibration dataset...")
     text = TEXT[language]
