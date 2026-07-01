@@ -13,7 +13,7 @@ from melotts import MeloTTS
 _tts_cache = {}
 
 
-def resolve_models(language: str, enc_model: str | None, dec_model: str | None):
+def resolve_models(language: str, enc_model: str | None, dec_model: str | None, bert_model: str | None):
     """
     按照你原来的 demo 逻辑，自动推断 encoder/decoder 的路径。
     """
@@ -39,20 +39,34 @@ def resolve_models(language: str, enc_model: str | None, dec_model: str | None):
     if not os.path.exists(dec_model):
         raise FileNotFoundError(f"Decoder model ({dec_model}) not exist!")
 
-    return lang, enc_model, dec_model
+    if bert_model is None and "ZH" in lang:
+        default_bert_model = "../models/bert-hidden-u16-zh.axmodel"
+        if os.path.exists(default_bert_model):
+            bert_model = default_bert_model
+    if bert_model is not None and not os.path.exists(bert_model):
+        raise FileNotFoundError(f"BERT model ({bert_model}) not exist!")
+
+    return lang, enc_model, dec_model, bert_model
 
 
-def get_tts(language: str, enc_model: str | None, dec_model: str | None, dec_len: int):
+def get_tts(language: str, enc_model: str | None, dec_model: str | None, bert_model: str | None, bert_tokenizer: str, dec_len: int):
     """
     获取 MeloTTS 实例（带缓存）
     key 只跟 enc/dec/lang/dec_len 有关，speed 和 sample_rate 是调用时决定的
     """
-    lang, enc_model_resolved, dec_model_resolved = resolve_models(language, enc_model, dec_model)
-    key = (lang, enc_model_resolved, dec_model_resolved, dec_len)
+    lang, enc_model_resolved, dec_model_resolved, bert_model_resolved = resolve_models(language, enc_model, dec_model, bert_model)
+    key = (lang, enc_model_resolved, dec_model_resolved, bert_model_resolved, bert_tokenizer, dec_len)
 
     if key not in _tts_cache:
-        print(f"Loading MeloTTS: lang={lang}, encoder={enc_model_resolved}, decoder={dec_model_resolved}, dec_len={dec_len}")
-        _tts_cache[key] = MeloTTS(enc_model_resolved, dec_model_resolved, lang, dec_len)
+        print(f"Loading MeloTTS: lang={lang}, encoder={enc_model_resolved}, decoder={dec_model_resolved}, bert={bert_model_resolved}, dec_len={dec_len}")
+        _tts_cache[key] = MeloTTS(
+            enc_model_resolved,
+            dec_model_resolved,
+            lang,
+            dec_len,
+            bert_model=bert_model_resolved,
+            bert_model_id=bert_tokenizer,
+        )
     return _tts_cache[key]
 
 
@@ -106,6 +120,8 @@ class TTSServerHandler(BaseHTTPRequestHandler):
         language = params.get("language", "ZH")
         enc_model = params.get("encoder", "../models/encoder-onnx/encoder-zh.onnx")  # 可以为 None
         dec_model = params.get("decoder", "../models/decoder-ax650/decoder-zh.axmodel")  # 可以为 None
+        bert_model = params.get("bert")  # 带 BERT 输入的 encoder 必须提供 BERT AXMODEL
+        bert_tokenizer = params.get("bert_tokenizer", "hfl/chinese-roberta-wwm-ext-large")
 
         try:
             sample_rate = int(params.get("sample_rate", 44100))
@@ -127,7 +143,7 @@ class TTSServerHandler(BaseHTTPRequestHandler):
 
         # 生成音频
         try:
-            tts = get_tts(language, enc_model, dec_model, dec_len)
+            tts = get_tts(language, enc_model, dec_model, bert_model, bert_tokenizer, dec_len)
             audio = tts.run(sentence, speed=speed, sample_rate=sample_rate)
         except Exception as e:
             self._send_json({"error": f"TTS failed: {e}"}, 500)

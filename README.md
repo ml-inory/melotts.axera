@@ -3,6 +3,7 @@
 MeloTTS DEMO on Axera AX650
 
 - 目前模型分成了 encoder、decoder 两部分，encoder 部分尚未转成 axmodel（目前通过 onnxruntime 运行） 
+- 如果使用带 `bert/ja_bert` 输入的新 encoder，BERT hidden states 通过 `bert-hidden-u16-zh.axmodel` 在 NPU 上运行；runtime 不再提供 CPU BERT fallback。
 
 ## 模型转换
 
@@ -49,14 +50,29 @@ pyaxengine 是 npu 的 python api，详细安装请参考
 ```
 git clone https://github.com/ml-inory/melotts.axera.git
 cd python  
-python3 melotts.py -s 要生成语音的句子
+python3 melotts_demo.py -s 要生成语音的句子
 ```  
 
 输入命令
 
 ```
-python3 melotts.py -s 爱芯元智半导体股份有限公司，致力于打造世界领先的人工智能感知与边缘计算芯片。服务智慧城市、智能驾驶、机器人的海量普惠的应用
+python3 melotts_demo.py -s 爱芯元智半导体股份有限公司，致力于打造世界领先的人工智能感知与边缘计算芯片。服务智慧城市、智能驾驶、机器人的海量普惠的应用
 ```
+
+带 BERT 输入的 encoder 需要额外传入 BERT AXMODEL：
+
+```
+python3 melotts_demo.py \
+  --language ZH \
+  --encoder ../models/encoder-zh.onnx \
+  --decoder ../models/decoder-zh.axmodel \
+  --bert ../models/bert-hidden-u16-zh.axmodel \
+  --bert-tokenizer ../models/bert-tokenizer-zh \
+  --sentence 人工智能是一种非常适合和促进自上而下集中控制的技术
+```
+
+如果 encoder ONNX 暴露 `bert` 或 `ja_bert` 输入但未提供 `--bert`，程序会直接报错；不会退回 CPU BERT。
+`--bert-tokenizer` 只用于 CPU tokenizer 前处理，不执行 CPU BERT 推理；也可以不传，默认使用 `hfl/chinese-roberta-wwm-ext-large`。
 
 输出音频
 
@@ -70,6 +86,8 @@ https://github.com/user-attachments/assets/eda5c10c-7d30-46e5-a56a-f6edcf7813af
 | -w/--wav | 输出音频路径，wav格式 | output.wav |
 | -e/--encoder | encoder模型路径 | ../models/encoder.onnx |
 | -d/--decoder | decoder模型路径 | ../models/decoder.axmodel |
+| -b/--bert | ZH BERT AXMODEL路径；仅带BERT输入的encoder需要 | ../models/bert-hidden-u16-zh.axmodel（文件存在时自动使用） |
+| --bert-tokenizer | ZH BERT tokenizer路径或HuggingFace ID | hfl/chinese-roberta-wwm-ext-large |
 | -sr/--sample_rate | 采样率 | 44100 |
 | --speed | 语速，越大表示越快 | 0.8 |
 | --language | 从"ZH", "ZH_MIX_EN", "JP", "EN", 'KR', "SP", "FR"选择，分别对应中文、中英混合、日语、英语、韩语、西班牙语，法语 | ZH_MIX_EN

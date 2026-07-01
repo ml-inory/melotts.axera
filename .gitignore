@@ -4,6 +4,7 @@ models/decoder-ax650/*.axmodel
 models/encoder-onnx/*.onnx
 python/*.wav
 *.onnx
+*.onnx.data
 *.axmodel
 *.pth
 *.pt

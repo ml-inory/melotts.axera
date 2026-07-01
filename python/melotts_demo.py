@@ -12,6 +12,8 @@ def main():
     parser.add_argument("--wav", "-w", type=str, required=False, default="output.wav")
     parser.add_argument("--encoder", "-e", type=str, required=False, default=None)
     parser.add_argument("--decoder", "-d", type=str, required=False, default=None)
+    parser.add_argument("--bert", "-b", type=str, required=False, default=None)
+    parser.add_argument("--bert-tokenizer", type=str, required=False, default="hfl/chinese-roberta-wwm-ext-large")
     parser.add_argument("--dec_len", type=int, default=128)
     parser.add_argument("--sample_rate", "-sr", type=int, required=False, default=44100)
     parser.add_argument("--speed", type=float, required=False, default=0.8)
@@ -25,6 +27,7 @@ def main():
     sample_rate = args.sample_rate
     enc_model = args.encoder # default="../models/encoder.onnx"
     dec_model = args.decoder # default="../models/decoder.axmodel"
+    bert_model = args.bert # default="../models/bert-hidden-u16-zh.axmodel" when present
     language = args.language # default: ZH_MIX_EN
     dec_len = args.dec_len # default: 128
 
@@ -43,14 +46,19 @@ def main():
         else:
             dec_model = f"../models/decoder-{language.lower()}.axmodel"
         assert os.path.exists(dec_model), f"Decoder model ({dec_model}) not exist!"
+    if bert_model is None and "ZH" in language:
+        default_bert_model = "../models/bert-hidden-u16-zh.axmodel"
+        if os.path.exists(default_bert_model):
+            bert_model = default_bert_model
 
     print(f"sentence: {sentence}")
     print(f"sample_rate: {sample_rate}")
     print(f"encoder: {enc_model}")
     print(f"decoder: {dec_model}")
+    print(f"bert: {bert_model}")
     print(f"language: {language}")
 
-    melotts = MeloTTS(enc_model, dec_model, language, dec_len)
+    melotts = MeloTTS(enc_model, dec_model, language, dec_len, bert_model=bert_model, bert_model_id=args.bert_tokenizer)
 
     audio = melotts.run(sentence, speed=args.speed, sample_rate=sample_rate)
     soundfile.write(args.wav, audio, sample_rate)

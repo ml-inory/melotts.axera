@@ -6,7 +6,7 @@ import onnxruntime as ort
 import axengine as axe
 import time
 from split_utils import split_sentence
-from text import cleaned_text_to_sequence, get_bert
+from text import cleaned_text_to_sequence
 from text.cleaner import clean_text
 from symbols import LANG_TO_SYMBOL_MAP
 import re
@@ -16,7 +16,7 @@ def intersperse(lst, item):
     result[1::2] = lst
     return result
 
-def get_text_for_tts_infer(text, language_str, symbol_to_id=None, use_bert=True, bert_device="cpu"):
+def get_text_for_tts_infer(text, language_str, symbol_to_id=None):
     norm_text, phone, tone, word2ph = clean_text(text, language_str)
     phone, tone, language = cleaned_text_to_sequence(phone, tone, language_str, symbol_to_id)
 
@@ -26,25 +26,12 @@ def get_text_for_tts_infer(text, language_str, symbol_to_id=None, use_bert=True,
     word2ph = [i * 2 for i in word2ph]
     word2ph[0] += 1
 
-    if use_bert:
-        bert_feature = get_bert(norm_text, word2ph, language_str, bert_device)
-        assert bert_feature.shape[-1] == len(phone), phone
-        if language_str == "ZH":
-            bert = bert_feature.unsqueeze(0).numpy().astype(np.float32)
-            ja_bert = np.zeros((1, 768, len(phone)), dtype=np.float32)
-        else:
-            bert = np.zeros((1, 1024, len(phone)), dtype=np.float32)
-            ja_bert = bert_feature.unsqueeze(0).numpy().astype(np.float32)
-    else:
-        bert = np.zeros((1, 1024, len(phone)), dtype=np.float32)
-        ja_bert = np.zeros((1, 768, len(phone)), dtype=np.float32)
-
     phone = np.array(phone, dtype=np.int32)
     tone = np.array(tone, dtype=np.int32)
     language = np.array(language, dtype=np.int32)
     word2ph = np.array(word2ph, dtype=np.int32)
 
-    return phone, tone, language, norm_text, word2ph, bert, ja_bert
+    return phone, tone, language, norm_text, word2ph
 
 def split_sentences_into_pieces(text, language, quiet=False):
     texts = split_sentence(text, language_str=language)
@@ -112,8 +99,61 @@ def generate_slices(word2pronoun, dec_len):
         zp_slices.append(slice(zp_start, zp_end))
     return pn_slices, zp_slices
 
+
+class AxBertFeatureExtractor:
+    def __init__(self, model_path, max_token_len=256, model_id="hfl/chinese-roberta-wwm-ext-large"):
+        self.max_token_len = max_token_len
+        self.sess = axe.InferenceSession(model_path)
+        try:
+            from transformers import AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError(
+                "BERT AXMODEL only replaces BERT inference. Tokenization still requires "
+                "`transformers`; install python/requirements.txt."
+            ) from exc
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    def _tokenize(self, norm_text):
+        batch = self.tokenizer(
+            norm_text,
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_token_len,
+        )
+        input_ids = np.asarray([batch["input_ids"]], dtype=np.int32)
+        attention_mask = np.asarray([batch["attention_mask"]], dtype=np.int32)
+        token_type_ids = batch.get("token_type_ids")
+        if token_type_ids is None:
+            token_type_ids = np.zeros((self.max_token_len,), dtype=np.int32)
+        token_type_ids = np.asarray([token_type_ids], dtype=np.int32)
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": token_type_ids,
+        }
+
+    def __call__(self, norm_text, word2ph, phone_len):
+        if len(word2ph) > self.max_token_len:
+            raise RuntimeError(
+                f"BERT token length {len(word2ph)} exceeds AXMODEL max_token_len={self.max_token_len}"
+            )
+
+        start = time.time()
+        hidden = self.sess.run(None, input_feed=self._tokenize(norm_text))[0].astype(np.float32)
+        print(f"bert axmodel run take {1000 * (time.time() - start):.2f}ms")
+
+        hidden = hidden.reshape(1, self.max_token_len, 1024)[0]
+        phone_features = [
+            np.repeat(hidden[i : i + 1], int(repeat), axis=0)
+            for i, repeat in enumerate(word2ph)
+        ]
+        bert = np.concatenate(phone_features, axis=0).T
+        if bert.shape[-1] != phone_len:
+            raise RuntimeError(f"BERT seq len {bert.shape[-1]} != phone len {phone_len}")
+        return bert.reshape(1, 1024, phone_len).astype(np.float32)
+
 class MeloTTS:
-    def __init__(self, enc_model, dec_model, language, dec_len):
+    def __init__(self, enc_model, dec_model, language, dec_len, bert_model=None, bert_model_id="hfl/chinese-roberta-wwm-ext-large"):
         self.language = language
         if self.language == "ZH":
             self.language = "ZH_MIX_EN"
@@ -122,6 +162,17 @@ class MeloTTS:
 
         self.sess_enc = ort.InferenceSession(enc_model, providers=["CPUExecutionProvider"], sess_options=ort.SessionOptions())
         self.enc_input_names = {inp.name for inp in self.sess_enc.get_inputs()}
+        self.needs_bert = bool({"bert", "ja_bert"} & self.enc_input_names)
+        if self.needs_bert and bert_model is None:
+            raise RuntimeError(
+                "Encoder requires `bert/ja_bert` inputs, but no BERT AXMODEL was provided. "
+                "Pass `--bert ../models/bert-hidden-u16-zh.axmodel`. CPU BERT fallback is disabled."
+            )
+        self.sess_bert = None
+        if self.needs_bert:
+            if self.language != "ZH_MIX_EN":
+                raise RuntimeError("BERT AXMODEL path currently supports Chinese/ZH_MIX_EN only.")
+            self.sess_bert = AxBertFeatureExtractor(bert_model, model_id=bert_model_id)
         self.sess_dec = axe.InferenceSession(dec_model)
         
         
@@ -137,9 +188,8 @@ class MeloTTS:
                 se = re.sub(r'([a-z])([A-Z])', r'\1 \2', se)
             print(f"\nSentence[{n}]: {se}")
             # Convert sentence to phones and tones
-            use_bert = bool({"bert", "ja_bert"} & self.enc_input_names)
-            phones, tones, lang_ids, norm_text, word2ph, bert, ja_bert = get_text_for_tts_infer(
-                se, self.language, symbol_to_id=self._symbol_to_id, use_bert=use_bert
+            phones, tones, lang_ids, norm_text, word2ph = get_text_for_tts_infer(
+                se, self.language, symbol_to_id=self._symbol_to_id
             )
 
             start = time.time()
@@ -152,9 +202,9 @@ class MeloTTS:
                                         'noise_scale_w': np.array([0], dtype=np.float32),
                                         'sdp_ratio': np.array([0], dtype=np.float32)}
             if "bert" in self.enc_input_names:
-                enc_inputs["bert"] = bert
+                enc_inputs["bert"] = self.sess_bert(norm_text, word2ph, len(phones))
             if "ja_bert" in self.enc_input_names:
-                enc_inputs["ja_bert"] = ja_bert
+                enc_inputs["ja_bert"] = np.zeros((1, 768, len(phones)), dtype=np.float32)
             z_p, pronoun_lens, audio_len = self.sess_enc.run(None, input_feed=enc_inputs)
             print(f"encoder run take {1000 * (time.time() - start):.2f}ms")
 
